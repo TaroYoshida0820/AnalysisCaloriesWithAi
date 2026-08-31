@@ -13,6 +13,40 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * 画像ファイルを指定サイズ以内に縮小し、JPEGとして圧縮したBase64データを返す。
+ * スマホのカメラ画像(数MB〜十数MB)をVercelの関数ペイロード上限(4.5MB)以内に収めるための処理。
+ */
+function compressImage(file, maxWidth = 1024, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // JPEGとして圧縮出力(dataURLからBase64部分だけ取り出す)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function App() {
   const [stage, setStage] = useState('idle'); // idle, analyzing, confirm, error
   const [imagePreview, setImagePreview] = useState(null);
@@ -45,39 +79,37 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const dataUrl = ev.target.result;
-      setImagePreview(dataUrl);
-      setStage('analyzing');
-      setErrorMsg('');
+    setStage('analyzing');
+    setErrorMsg('');
 
-      try {
-        const base64Data = dataUrl.split(',')[1];
-        const mediaType = file.type || 'image/jpeg';
+    try {
+      // 送信前にブラウザ側で縮小・圧縮(Vercelのペイロード上限対策)
+      const compressedDataUrl = await compressImage(file, 1024, 0.7);
+      setImagePreview(compressedDataUrl);
 
-        // Vercelのサーバーレス関数経由で解析(APIキーはブラウザに渡らない)
-        const response = await fetch('/api/analyze-food', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: base64Data, mediaType }),
-        });
+      const base64Data = compressedDataUrl.split(',')[1];
+      const mediaType = 'image/jpeg'; // compressImageは常にJPEGで出力する
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error || '解析に失敗しました');
-        }
+      // Vercelのサーバーレス関数経由で解析(APIキーはブラウザに渡らない)
+      const response = await fetch('/api/analyze-food', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Data, mediaType }),
+      });
 
-        const result = await response.json();
-        setAnalysis(result);
-        setStage('confirm');
-      } catch (err) {
-        console.error(err);
-        setErrorMsg('解析に失敗しました。もう一度お試しください。');
-        setStage('error');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || '解析に失敗しました');
       }
-    };
-    reader.readAsDataURL(file);
+
+      const result = await response.json();
+      setAnalysis(result);
+      setStage('confirm');
+    } catch (err) {
+      console.error(err);
+      setErrorMsg('解析に失敗しました。もう一度お試しください。');
+      setStage('error');
+    }
   }, []);
 
   const handleConfirm = async () => {
