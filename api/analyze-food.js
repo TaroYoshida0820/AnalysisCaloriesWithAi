@@ -2,9 +2,9 @@
 // Vercelのサーバーレス関数。ブラウザからはこのエンドポイントだけを叩く。
 // APIキー(ANTHROPIC_API_KEY)はVercelの環境変数に設定し、フロントには一切渡さない。
 
-const { analyzeFoodImage } = require('../lib/calorieAnalyzer');
+import { analyzeFoodImage } from '../lib/calorieAnalyzer.js';
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'POSTメソッドのみ対応しています' });
   }
@@ -21,4 +21,4 @@ module.exports = async function handler(req, res) {
     console.error(err);
     return res.status(500).json({ error: err.message });
   }
-};
+}
