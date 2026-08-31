@@ -10,12 +10,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { imageBase64, mediaType } = req.body;
+    const { imageBase64, mediaType, userComment } = req.body;
     if (!imageBase64 || !mediaType) {
       return res.status(400).json({ error: 'imageBase64 と mediaType が必要です' });
     }
 
-    const result = await analyzeFoodImage(imageBase64, mediaType);
+    const result = await analyzeFoodImage(imageBase64, mediaType, userComment);
     return res.status(200).json(result);
   } catch (err) {
     console.error(err);

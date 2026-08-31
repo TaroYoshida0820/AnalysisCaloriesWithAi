@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, Check, X, Calendar, TrendingUp, Loader2 } from 'lucide-react';
+import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const NAVY = '#1B2A4A';
@@ -13,10 +13,6 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/**
- * 画像ファイルを指定サイズ以内に縮小し、JPEGとして圧縮したBase64データを返す。
- * スマホのカメラ画像(数MB〜十数MB)をVercelの関数ペイロード上限(4.5MB)以内に収めるための処理。
- */
 function compressImage(file, maxWidth = 1024, quality = 0.7) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -28,16 +24,12 @@ function compressImage(file, maxWidth = 1024, quality = 0.7) {
           height = Math.round((height * maxWidth) / width);
           width = maxWidth;
         }
-
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
-
-        // JPEGとして圧縮出力(dataURLからBase64部分だけ取り出す)
-        const dataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve(dataUrl);
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -47,9 +39,13 @@ function compressImage(file, maxWidth = 1024, quality = 0.7) {
   });
 }
 
+const emptyManualEntry = { foodName: '', kcal: '', protein: '', fat: '', carbs: '' };
+
 export default function App() {
-  const [stage, setStage] = useState('idle'); // idle, analyzing, confirm, error
+  const [stage, setStage] = useState('idle');
+  const [pendingFile, setPendingFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [comment, setComment] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [entries, setEntries] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
@@ -59,10 +55,7 @@ export default function App() {
     .filter((e) => e.logged_date === todayStr())
     .reduce((sum, e) => sum + e.kcal, 0);
 
-  // 起動時に直近の記録をSupabaseから読み込む
-  useEffect(() => {
-    loadRecentEntries();
-  }, []);
+  useEffect(() => { loadRecentEntries(); }, []);
 
   async function loadRecentEntries() {
     const { data, error } = await supabase
@@ -71,30 +64,31 @@ export default function App() {
       .order('logged_date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(20);
-
     if (!error && data) setEntries(data);
   }
 
-  const handleFileChange = useCallback(async (e) => {
+  const handleFileChange = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    setStage('analyzing');
+    setPendingFile(file);
+    setComment('');
     setErrorMsg('');
+    setStage('comment');
+  }, []);
 
+  const runAnalysis = useCallback(async () => {
+    if (!pendingFile) return;
+    setStage('analyzing');
     try {
-      // 送信前にブラウザ側で縮小・圧縮(Vercelのペイロード上限対策)
-      const compressedDataUrl = await compressImage(file, 1024, 0.7);
+      const compressedDataUrl = await compressImage(pendingFile, 1024, 0.7);
       setImagePreview(compressedDataUrl);
-
       const base64Data = compressedDataUrl.split(',')[1];
-      const mediaType = 'image/jpeg'; // compressImageは常にJPEGで出力する
+      const mediaType = 'image/jpeg';
 
-      // Vercelのサーバーレス関数経由で解析(APIキーはブラウザに渡らない)
       const response = await fetch('/api/analyze-food', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Data, mediaType }),
+        body: JSON.stringify({ imageBase64: base64Data, mediaType, userComment: comment }),
       });
 
       if (!response.ok) {
@@ -103,23 +97,46 @@ export default function App() {
       }
 
       const result = await response.json();
-      setAnalysis(result);
+      setAnalysis({
+        foodName: result.foodName,
+        kcal: String(result.kcal),
+        protein: String(result.protein),
+        fat: String(result.fat),
+        carbs: String(result.carbs),
+        provider: result.provider,
+      });
       setStage('confirm');
     } catch (err) {
       console.error(err);
       setErrorMsg('解析に失敗しました。もう一度お試しください。');
       setStage('error');
     }
-  }, []);
+  }, [pendingFile, comment]);
+
+  const startManualEntry = () => {
+    setAnalysis({ ...emptyManualEntry, provider: 'manual' });
+    setImagePreview(null);
+    setStage('confirm');
+  };
+
+  const updateAnalysisField = (field, value) => {
+    setAnalysis((prev) => ({ ...prev, [field]: value }));
+  };
 
   const handleConfirm = async () => {
+    const kcalNum = parseInt(analysis.kcal, 10);
+    if (!analysis.foodName?.trim() || Number.isNaN(kcalNum)) {
+      setErrorMsg('料理名とカロリーは必須です。');
+      return;
+    }
+
     const newEntry = {
       logged_date: todayStr(),
-      food_name: analysis.foodName,
-      kcal: analysis.kcal,
-      protein_g: analysis.protein,
-      fat_g: analysis.fat,
-      carbs_g: analysis.carbs,
+      food_name: analysis.foodName.trim(),
+      kcal: kcalNum,
+      protein_g: analysis.protein ? parseInt(analysis.protein, 10) : null,
+      fat_g: analysis.fat ? parseInt(analysis.fat, 10) : null,
+      carbs_g: analysis.carbs ? parseInt(analysis.carbs, 10) : null,
       provider: analysis.provider,
     };
 
@@ -138,14 +155,19 @@ export default function App() {
 
   const resetFlow = () => {
     setStage('idle');
+    setPendingFile(null);
     setImagePreview(null);
+    setComment('');
     setAnalysis(null);
     setErrorMsg('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const openCamera = () => {
-    fileInputRef.current?.click();
+  const openCamera = () => { fileInputRef.current?.click(); };
+
+  const inputStyle = {
+    width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #D1D5DB',
+    fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box',
   };
 
   return (
@@ -161,44 +183,52 @@ export default function App() {
 
       <div style={{ padding: '20px', maxWidth: 480, margin: '0 auto' }}>
         {stage === 'idle' && (
-          <button
-            onClick={openCamera}
-            style={{
-              width: '100%',
-              background: TEAL,
-              color: '#fff',
-              border: 'none',
-              borderRadius: 14,
-              padding: '18px',
-              fontSize: 16,
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 10,
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(0,184,169,0.35)',
-            }}
-          >
-            <Camera size={22} />
-            カロリーを登録する
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button onClick={openCamera} style={{
+              width: '100%', background: TEAL, color: '#fff', border: 'none', borderRadius: 14,
+              padding: '18px', fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', gap: 10, cursor: 'pointer', boxShadow: '0 4px 14px rgba(0,184,169,0.35)',
+            }}>
+              <Camera size={22} />
+              カロリーを登録する
+            </button>
+            <button onClick={startManualEntry} style={{
+              width: '100%', background: '#fff', color: NAVY, border: '1px solid #D1D5DB', borderRadius: 14,
+              padding: '14px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', gap: 8, cursor: 'pointer',
+            }}>
+              <PenLine size={18} />
+              手入力で登録する(AI解析なし)
+            </button>
+          </div>
         )}
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-        />
+        <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
+
+        {stage === 'comment' && (
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20 }}>
+            <p style={{ color: NAVY, fontSize: 15, fontWeight: 700, margin: '0 0 12px' }}>補足コメント(任意)</p>
+            <p style={{ color: MUTED, fontSize: 12, margin: '0 0 10px', lineHeight: 1.5 }}>
+              量や残した分など、写真だけでは伝わらない情報があれば入力してください。<br />
+              例:「並盛でした」「スープは半分残した」
+            </p>
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)}
+              placeholder="例: 富士そばの大盛と表示されていましたが並盛でした" rows={3}
+              style={{ ...inputStyle, resize: 'vertical', marginBottom: 16 }} />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={resetFlow} style={{ flex: 1, background: '#fff', color: MUTED, border: '1px solid #D1D5DB', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                キャンセル
+              </button>
+              <button onClick={runAnalysis} style={{ flex: 2, background: NAVY, color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                この内容で解析する
+              </button>
+            </div>
+          </div>
+        )}
 
         {stage === 'analyzing' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, textAlign: 'center' }}>
-            {imagePreview && (
-              <img src={imagePreview} alt="撮影した食事" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 16 }} />
-            )}
+            {imagePreview && <img src={imagePreview} alt="撮影した食事" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 16 }} />}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: NAVY }}>
               <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
               <span style={{ fontSize: 14, fontWeight: 500 }}>カロリーを解析中...</span>
@@ -209,43 +239,36 @@ export default function App() {
 
         {stage === 'confirm' && analysis && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20 }}>
-            {imagePreview && (
-              <img src={imagePreview} alt="撮影した食事" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 16 }} />
-            )}
-            <p style={{ color: MUTED, fontSize: 13, margin: '0 0 4px' }}>推定メニュー</p>
-            <p style={{ color: NAVY, fontSize: 18, fontWeight: 700, margin: '0 0 16px', fontFamily: 'Cambria, serif' }}>{analysis.foodName}</p>
+            {imagePreview && <img src={imagePreview} alt="撮影した食事" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 16 }} />}
+            {analysis.provider === 'manual' && <p style={{ color: TEAL, fontSize: 12, fontWeight: 700, margin: '0 0 12px' }}>手入力モード(AI解析なし)</p>}
+
+            <p style={{ color: MUTED, fontSize: 13, margin: '0 0 4px' }}>料理名</p>
+            <input type="text" value={analysis.foodName} onChange={(e) => updateAnalysisField('foodName', e.target.value)}
+              placeholder="例: 鴨南蛮そば" style={{ ...inputStyle, marginBottom: 16, fontSize: 16, fontWeight: 700, color: NAVY }} />
 
             <div style={{ background: ICE, borderRadius: 10, padding: 16, marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 12 }}>
-                <span style={{ fontSize: 30, fontWeight: 700, color: NAVY }}>{analysis.kcal}</span>
-                <span style={{ fontSize: 14, color: MUTED }}>kcal</span>
-              </div>
+              <p style={{ fontSize: 11, color: MUTED, margin: '0 0 6px' }}>カロリー(kcal) — 数値を編集できます</p>
+              <input type="number" value={analysis.kcal} onChange={(e) => updateAnalysisField('kcal', e.target.value)}
+                style={{ ...inputStyle, fontSize: 24, fontWeight: 700, color: NAVY, marginBottom: 14 }} />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                {[
-                  ['たんぱく質', analysis.protein],
-                  ['脂質', analysis.fat],
-                  ['炭水化物', analysis.carbs],
-                ].map(([label, val]) => (
-                  <div key={label} style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: 11, color: MUTED, margin: '0 0 2px' }}>{label}</p>
-                    <p style={{ fontSize: 15, fontWeight: 600, color: NAVY, margin: 0 }}>{val}g</p>
+                {[['たんぱく質', 'protein'], ['脂質', 'fat'], ['炭水化物', 'carbs']].map(([label, field]) => (
+                  <div key={field}>
+                    <p style={{ fontSize: 11, color: MUTED, margin: '0 0 4px', textAlign: 'center' }}>{label}(g)</p>
+                    <input type="number" value={analysis[field]} onChange={(e) => updateAnalysisField(field, e.target.value)}
+                      style={{ ...inputStyle, textAlign: 'center', fontSize: 14, fontWeight: 600, padding: '8px' }} />
                   </div>
                 ))}
               </div>
             </div>
 
+            {errorMsg && <p style={{ color: '#B91C1C', fontSize: 13, margin: '0 0 12px' }}>{errorMsg}</p>}
+
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={resetFlow}
-                style={{ flex: 1, background: '#fff', color: MUTED, border: `1px solid #D1D5DB`, borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}
-              >
+              <button onClick={resetFlow} style={{ flex: 1, background: '#fff', color: MUTED, border: '1px solid #D1D5DB', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
                 <X size={16} />
                 取り消す
               </button>
-              <button
-                onClick={handleConfirm}
-                style={{ flex: 2, background: NAVY, color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}
-              >
+              <button onClick={handleConfirm} style={{ flex: 2, background: NAVY, color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
                 <Check size={16} />
                 この内容で登録する
               </button>
@@ -256,10 +279,7 @@ export default function App() {
         {stage === 'error' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, textAlign: 'center' }}>
             <p style={{ color: '#B91C1C', fontSize: 14, margin: '0 0 16px' }}>{errorMsg}</p>
-            <button
-              onClick={resetFlow}
-              style={{ background: NAVY, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
-            >
+            <button onClick={resetFlow} style={{ background: NAVY, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
               やり直す
             </button>
           </div>
@@ -269,26 +289,19 @@ export default function App() {
           <div style={{ marginTop: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
               <TrendingUp size={16} color={NAVY} />
-              <p style={{ fontSize: 14, fontWeight: 700, color: NAVY, margin: 0 }}>記録一覧</p>
+              <p style={{ fontSize: 14, fontWeight: 700, color: NAVY, margin: 0 }}>直近の記録(最新20件)</p>
             </div>
             {entries.map((entry) => (
-              <div
-                key={entry.id}
-                style={{
-                  background: '#fff',
-                  borderRadius: 10,
-                  padding: '12px 16px',
-                  marginBottom: 8,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
+              <div key={entry.id} style={{
+                background: '#fff', borderRadius: 10, padding: '12px 16px', marginBottom: 8,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
                 <div>
                   <p style={{ fontSize: 14, fontWeight: 600, color: NAVY, margin: '0 0 2px' }}>{entry.food_name}</p>
                   <p style={{ fontSize: 12, color: MUTED, margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Calendar size={11} />
                     {entry.logged_date}
+                    {entry.provider === 'manual' && <span style={{ color: TEAL, fontWeight: 600 }}>・手入力</span>}
                   </p>
                 </div>
                 <p style={{ fontSize: 16, fontWeight: 700, color: TEAL, margin: 0 }}>{entry.kcal} kcal</p>
