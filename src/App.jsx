@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine } from 'lucide-react';
+import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const NAVY = '#1B2A4A';
@@ -48,6 +48,7 @@ export default function App() {
   const [comment, setComment] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [entries, setEntries] = useState([]);
+  const [frequentFoods, setFrequentFoods] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef(null);
 
@@ -55,7 +56,10 @@ export default function App() {
     .filter((e) => e.logged_date === todayStr())
     .reduce((sum, e) => sum + e.kcal, 0);
 
-  useEffect(() => { loadRecentEntries(); }, []);
+  useEffect(() => {
+    loadRecentEntries();
+    loadFrequentFoods();
+  }, []);
 
   async function loadRecentEntries() {
     const { data, error } = await supabase
@@ -65,6 +69,34 @@ export default function App() {
       .order('created_at', { ascending: false })
       .limit(20);
     if (!error && data) setEntries(data);
+  }
+
+  // 過去の記録から「よく食べるもの」を集計する。
+  // 同じ料理名が何度も出てくるものを頻度順に並べ、直近の栄養値をそのまま使い回せるようにする。
+  async function loadFrequentFoods() {
+    const { data, error } = await supabase
+      .from('food_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error || !data) return;
+
+    const map = new Map();
+    for (const row of data) {
+      if (!map.has(row.food_name)) {
+        map.set(row.food_name, { ...row, count: 1 });
+      } else {
+        map.get(row.food_name).count += 1;
+      }
+    }
+
+    const sorted = Array.from(map.values())
+      .filter((item) => item.count >= 2) // 1回しか食べてないものは「よく食べる」に含めない
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+
+    setFrequentFoods(sorted);
   }
 
   const handleFileChange = useCallback((e) => {
@@ -115,6 +147,21 @@ export default function App() {
 
   const startManualEntry = () => {
     setAnalysis({ ...emptyManualEntry, provider: 'manual' });
+    setImagePreview(null);
+    setStage('confirm');
+  };
+
+  // 「よく食べるもの」をタップした時、写真撮影・AI解析をスキップして
+  // 過去の栄養値をそのまま確認画面に流し込む(その場で微調整も可能)
+  const selectFrequentFood = (item) => {
+    setAnalysis({
+      foodName: item.food_name,
+      kcal: String(item.kcal),
+      protein: item.protein_g != null ? String(item.protein_g) : '',
+      fat: item.fat_g != null ? String(item.fat_g) : '',
+      carbs: item.carbs_g != null ? String(item.carbs_g) : '',
+      provider: 'repeat',
+    });
     setImagePreview(null);
     setStage('confirm');
   };
@@ -200,6 +247,37 @@ export default function App() {
               <PenLine size={18} />
               手入力で登録する(AI解析なし)
             </button>
+
+            {frequentFoods.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                  <Repeat size={14} color={NAVY} />
+                  <p style={{ fontSize: 13, fontWeight: 700, color: NAVY, margin: 0 }}>よく食べるもの</p>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {frequentFoods.map((item) => (
+                    <button
+                      key={item.food_name}
+                      onClick={() => selectFrequentFood(item)}
+                      style={{
+                        background: '#fff', border: `1px solid ${ICE}`, borderRadius: 20,
+                        padding: '8px 14px', fontSize: 13, color: NAVY, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{item.food_name}</span>
+                      <span style={{ color: MUTED, fontSize: 11 }}>{item.kcal}kcal</span>
+                      <span style={{
+                        background: ICE, color: NAVY, borderRadius: 10, padding: '1px 6px',
+                        fontSize: 10, fontWeight: 700,
+                      }}>
+                        ×{item.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -241,6 +319,7 @@ export default function App() {
           <div style={{ background: '#fff', borderRadius: 14, padding: 20 }}>
             {imagePreview && <img src={imagePreview} alt="撮影した食事" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 16 }} />}
             {analysis.provider === 'manual' && <p style={{ color: TEAL, fontSize: 12, fontWeight: 700, margin: '0 0 12px' }}>手入力モード(AI解析なし)</p>}
+            {analysis.provider === 'repeat' && <p style={{ color: TEAL, fontSize: 12, fontWeight: 700, margin: '0 0 12px' }}>よく食べるものから選択(過去の記録を再利用・必要に応じて数値を調整してください)</p>}
 
             <p style={{ color: MUTED, fontSize: 13, margin: '0 0 4px' }}>料理名</p>
             <input type="text" value={analysis.foodName} onChange={(e) => updateAnalysisField('foodName', e.target.value)}
