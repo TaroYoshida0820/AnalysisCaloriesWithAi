@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat } from 'lucide-react';
+import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat, Trash2 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const NAVY = '#1B2A4A';
@@ -55,6 +55,11 @@ export default function App() {
   const totalToday = entries
     .filter((e) => e.logged_date === todayStr())
     .reduce((sum, e) => sum + e.kcal, 0);
+
+  const todayEntries = entries.filter((e) => e.logged_date === todayStr());
+  const totalProteinToday = todayEntries.reduce((sum, e) => sum + (e.protein_g || 0), 0);
+  const totalFatToday = todayEntries.reduce((sum, e) => sum + (e.fat_g || 0), 0);
+  const totalCarbsToday = todayEntries.reduce((sum, e) => sum + (e.carbs_g || 0), 0);
 
   useEffect(() => {
     loadRecentEntries();
@@ -200,6 +205,22 @@ export default function App() {
     resetFlow();
   };
 
+  // 記録一覧から1件削除する。確認ダイアログを挟んで誤操作を防ぐ。
+  const handleDelete = async (id) => {
+    const ok = window.confirm('この記録を削除しますか?');
+    if (!ok) return;
+
+    const { error } = await supabase.from('food_logs').delete().eq('id', id);
+    if (error) {
+      console.error(error);
+      alert('削除に失敗しました。');
+      return;
+    }
+
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    loadFrequentFoods(); // 「よく食べるもの」の集計も更新
+  };
+
   const resetFlow = () => {
     setStage('idle');
     setPendingFile(null);
@@ -226,6 +247,24 @@ export default function App() {
         <p style={{ color: '#fff', fontSize: 40, fontWeight: 700, margin: '4px 0 0', fontFamily: 'Cambria, serif' }}>
           {totalToday.toLocaleString()} <span style={{ fontSize: 18, fontWeight: 400, color: '#B8C2D9' }}>kcal</span>
         </p>
+
+        {todayEntries.length > 0 && (
+          <div style={{ display: 'flex', gap: 16, marginTop: 12, position: 'relative', zIndex: 1 }}>
+            {[
+              ['P', totalProteinToday, '#7FE3D6'],
+              ['F', totalFatToday, '#FFC97F'],
+              ['C', totalCarbsToday, '#9FB4E0'],
+            ].map(([label, value, color]) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                <span style={{ color, fontSize: 11, fontWeight: 700 }}>{label}</span>
+                <span style={{ color: '#fff', fontSize: 18, fontWeight: 700, fontFamily: 'Cambria, serif' }}>
+                  {value}
+                </span>
+                <span style={{ color: '#B8C2D9', fontSize: 10 }}>g</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: '20px', maxWidth: 480, margin: '0 auto' }}>
@@ -383,7 +422,19 @@ export default function App() {
                     {entry.provider === 'manual' && <span style={{ color: TEAL, fontWeight: 600 }}>・手入力</span>}
                   </p>
                 </div>
-                <p style={{ fontSize: 16, fontWeight: 700, color: TEAL, margin: 0 }}>{entry.kcal} kcal</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <p style={{ fontSize: 16, fontWeight: 700, color: TEAL, margin: 0 }}>{entry.kcal} kcal</p>
+                  <button
+                    onClick={() => handleDelete(entry.id)}
+                    aria-label="削除"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                      color: MUTED, display: 'flex', alignItems: 'center',
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
