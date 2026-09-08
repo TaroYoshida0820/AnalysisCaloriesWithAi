@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat, Trash2 } from 'lucide-react';
+import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat, Trash2, Scale, Utensils } from 'lucide-react';
 import { supabase } from './supabaseClient';
+import WeightDashboard from './WeightDashboard';
 
 const NAVY = '#1B2A4A';
 const NAVY_DARK = '#121D33';
@@ -42,6 +43,7 @@ function compressImage(file, maxWidth = 1024, quality = 0.7) {
 const emptyManualEntry = { foodName: '', kcal: '', protein: '', fat: '', carbs: '' };
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState('food'); // 'food' | 'weight'
   const [stage, setStage] = useState('idle');
   const [pendingFile, setPendingFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -240,32 +242,66 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#F7F8FA', fontFamily: 'Calibri, sans-serif' }}>
-      <div style={{ background: NAVY_DARK, padding: '24px 20px 32px', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: -30, right: -30, width: 120, height: 120, borderRadius: '50%', background: TEAL, opacity: 0.15 }} />
-        <div style={{ position: 'absolute', bottom: -50, right: 30, width: 90, height: 90, borderRadius: '50%', background: TEAL, opacity: 0.1 }} />
-        <p style={{ color: '#B8C2D9', fontSize: 13, margin: 0, letterSpacing: 0.5 }}>今日の摂取カロリー</p>
-        <p style={{ color: '#fff', fontSize: 40, fontWeight: 700, margin: '4px 0 0', fontFamily: 'Cambria, serif' }}>
-          {totalToday.toLocaleString()} <span style={{ fontSize: 18, fontWeight: 400, color: '#B8C2D9' }}>kcal</span>
-        </p>
-
-        {todayEntries.length > 0 && (
-          <div style={{ display: 'flex', gap: 16, marginTop: 12, position: 'relative', zIndex: 1 }}>
-            {[
-              ['P', totalProteinToday, '#7FE3D6'],
-              ['F', totalFatToday, '#FFC97F'],
-              ['C', totalCarbsToday, '#9FB4E0'],
-            ].map(([label, value, color]) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                <span style={{ color, fontSize: 11, fontWeight: 700 }}>{label}</span>
-                <span style={{ color: '#fff', fontSize: 18, fontWeight: 700, fontFamily: 'Cambria, serif' }}>
-                  {value}
-                </span>
-                <span style={{ color: '#B8C2D9', fontSize: 10 }}>g</span>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* タブ切り替え */}
+      <div style={{ display: 'flex', background: NAVY_DARK, padding: '12px 20px 0' }}>
+        <button
+          onClick={() => setActiveTab('food')}
+          style={{
+            flex: 1, background: 'none', border: 'none', paddingBottom: 12, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            color: activeTab === 'food' ? '#fff' : '#8492AD',
+            fontSize: 14, fontWeight: 600,
+            borderBottom: activeTab === 'food' ? `2px solid ${TEAL}` : '2px solid transparent',
+          }}
+        >
+          <Utensils size={16} />
+          食事
+        </button>
+        <button
+          onClick={() => setActiveTab('weight')}
+          style={{
+            flex: 1, background: 'none', border: 'none', paddingBottom: 12, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            color: activeTab === 'weight' ? '#fff' : '#8492AD',
+            fontSize: 14, fontWeight: 600,
+            borderBottom: activeTab === 'weight' ? `2px solid ${TEAL}` : '2px solid transparent',
+          }}
+        >
+          <Scale size={16} />
+          体重
+        </button>
       </div>
+
+      {activeTab === 'weight' ? (
+        <WeightDashboard />
+      ) : (
+        <>
+          <div style={{ background: NAVY_DARK, padding: '20px 20px 32px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: -30, right: -30, width: 120, height: 120, borderRadius: '50%', background: TEAL, opacity: 0.15 }} />
+            <div style={{ position: 'absolute', bottom: -50, right: 30, width: 90, height: 90, borderRadius: '50%', background: TEAL, opacity: 0.1 }} />
+            <p style={{ color: '#B8C2D9', fontSize: 13, margin: 0, letterSpacing: 0.5 }}>今日の摂取カロリー</p>
+            <p style={{ color: '#fff', fontSize: 40, fontWeight: 700, margin: '4px 0 0', fontFamily: 'Cambria, serif' }}>
+              {totalToday.toLocaleString()} <span style={{ fontSize: 18, fontWeight: 400, color: '#B8C2D9' }}>kcal</span>
+            </p>
+
+            {todayEntries.length > 0 && (
+              <div style={{ display: 'flex', gap: 16, marginTop: 12, position: 'relative', zIndex: 1 }}>
+                {[
+                  ['P', totalProteinToday, '#7FE3D6'],
+                  ['F', totalFatToday, '#FFC97F'],
+                  ['C', totalCarbsToday, '#9FB4E0'],
+                ].map(([label, value, color]) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                    <span style={{ color, fontSize: 11, fontWeight: 700 }}>{label}</span>
+                    <span style={{ color: '#fff', fontSize: 18, fontWeight: 700, fontFamily: 'Cambria, serif' }}>
+                      {value}
+                    </span>
+                    <span style={{ color: '#B8C2D9', fontSize: 10 }}>g</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
       <div style={{ padding: '20px', maxWidth: 480, margin: '0 auto' }}>
         {stage === 'idle' && (
@@ -440,6 +476,8 @@ export default function App() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
