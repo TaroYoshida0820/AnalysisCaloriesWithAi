@@ -170,10 +170,10 @@ export default function WeightDashboard() {
         ) : (
           <>
             <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={chartData} margin={{ top: 5, right: 12, left: -10, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 5, right: 12, left: 0, bottom: 5 }}>
                 <CartesianGrid stroke={ICE} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: MUTED }} interval="preserveStartEnd" />
-                <YAxis yAxisId="weight" domain={weightDomain} tick={{ fontSize: 11, fill: MUTED }} width={40} />
+                <YAxis yAxisId="weight" domain={weightDomain} tick={{ fontSize: 11, fill: MUTED }} width={48} />
                 {showFat && hasFatData && (
                   <YAxis yAxisId="fat" orientation="right" domain={fatDomain} tick={{ fontSize: 11, fill: MUTED }} width={36} />
                 )}
