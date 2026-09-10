@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat, Trash2, Scale, Utensils } from 'lucide-react';
+import { Camera, Check, X, Calendar, TrendingUp, Loader2, PenLine, Repeat, Trash2, Scale, Utensils, Pencil } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import WeightDashboard from './WeightDashboard';
+import CalorieDashboard from './CalorieDashboard';
 
 const NAVY = '#1B2A4A';
 const NAVY_DARK = '#121D33';
@@ -184,8 +185,7 @@ export default function App() {
       return;
     }
 
-    const newEntry = {
-      logged_date: todayStr(),
+    const entryFields = {
       food_name: analysis.foodName.trim(),
       kcal: kcalNum,
       protein_g: analysis.protein ? parseInt(analysis.protein, 10) : null,
@@ -194,16 +194,37 @@ export default function App() {
       provider: analysis.provider,
     };
 
-    const { data, error } = await supabase.from('food_logs').insert(newEntry).select();
+    if (analysis.id) {
+      // 編集モード: 既存レコードを更新(日付・登録日時は変更しない)
+      const { data, error } = await supabase
+        .from('food_logs')
+        .update(entryFields)
+        .eq('id', analysis.id)
+        .select();
 
-    if (error) {
-      console.error(error);
-      setErrorMsg('データベースへの保存に失敗しました。');
-      setStage('error');
-      return;
+      if (error) {
+        console.error(error);
+        setErrorMsg('更新に失敗しました。');
+        setStage('error');
+        return;
+      }
+
+      setEntries((prev) => prev.map((e) => (e.id === analysis.id ? data[0] : e)));
+    } else {
+      // 新規登録モード
+      const newEntry = { logged_date: todayStr(), ...entryFields };
+      const { data, error } = await supabase.from('food_logs').insert(newEntry).select();
+
+      if (error) {
+        console.error(error);
+        setErrorMsg('データベースへの保存に失敗しました。');
+        setStage('error');
+        return;
+      }
+
+      setEntries((prev) => [data[0], ...prev]);
     }
 
-    setEntries((prev) => [data[0], ...prev]);
     resetFlow();
   };
 
@@ -221,6 +242,21 @@ export default function App() {
 
     setEntries((prev) => prev.filter((e) => e.id !== id));
     loadFrequentFoods(); // 「よく食べるもの」の集計も更新
+  };
+
+  // 保存済みの記録を編集する(一部だけ入力していたものを後から直す用途)
+  const startEditEntry = (entry) => {
+    setAnalysis({
+      id: entry.id, // 更新対象を区別するために保持(新規登録時はundefined)
+      foodName: entry.food_name,
+      kcal: String(entry.kcal),
+      protein: entry.protein_g != null ? String(entry.protein_g) : '',
+      fat: entry.fat_g != null ? String(entry.fat_g) : '',
+      carbs: entry.carbs_g != null ? String(entry.carbs_g) : '',
+      provider: entry.provider,
+    });
+    setImagePreview(null);
+    setStage('confirm');
   };
 
   const resetFlow = () => {
@@ -270,10 +306,25 @@ export default function App() {
           <Scale size={16} />
           体重
         </button>
+        <button
+          onClick={() => setActiveTab('calorie_trend')}
+          style={{
+            flex: 1, background: 'none', border: 'none', paddingBottom: 12, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            color: activeTab === 'calorie_trend' ? '#fff' : '#8492AD',
+            fontSize: 14, fontWeight: 600,
+            borderBottom: activeTab === 'calorie_trend' ? `2px solid ${TEAL}` : '2px solid transparent',
+          }}
+        >
+          <TrendingUp size={16} />
+          推移
+        </button>
       </div>
 
       {activeTab === 'weight' ? (
         <WeightDashboard />
+      ) : activeTab === 'calorie_trend' ? (
+        <CalorieDashboard />
       ) : (
         <>
           <div style={{ background: NAVY_DARK, padding: '20px 20px 32px', position: 'relative', overflow: 'hidden' }}>
@@ -424,7 +475,7 @@ export default function App() {
               </button>
               <button onClick={handleConfirm} style={{ flex: 2, background: NAVY, color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}>
                 <Check size={16} />
-                この内容で登録する
+                {analysis.id ? 'この内容に更新する' : 'この内容で登録する'}
               </button>
             </div>
           </div>
@@ -460,6 +511,16 @@ export default function App() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <p style={{ fontSize: 16, fontWeight: 700, color: TEAL, margin: 0 }}>{entry.kcal} kcal</p>
+                  <button
+                    onClick={() => startEditEntry(entry)}
+                    aria-label="編集"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                      color: MUTED, display: 'flex', alignItems: 'center',
+                    }}
+                  >
+                    <Pencil size={16} />
+                  </button>
                   <button
                     onClick={() => handleDelete(entry.id)}
                     aria-label="削除"
