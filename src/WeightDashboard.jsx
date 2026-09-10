@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
 import { TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -49,14 +49,27 @@ export default function WeightDashboard() {
   const periodDiff =
     chartData.length > 1 ? (chartData[chartData.length - 1].weight - chartData[0].weight) : null;
 
+  // 全期間(表示中の期間に関わらず)の最高体重。ダイエットの進捗ギャップを見せるための基準線に使う。
+  const allTimeMaxWeight = useMemo(() => {
+    if (logs.length === 0) return null;
+    return Math.max(...logs.map((l) => Number(l.weight_kg)));
+  }, [logs]);
+
+  const maxWeightDate = useMemo(() => {
+    if (!allTimeMaxWeight) return null;
+    const record = logs.find((l) => Number(l.weight_kg) === allTimeMaxWeight);
+    return record ? record.logged_date : null;
+  }, [logs, allTimeMaxWeight]);
+
   const weightDomain = useMemo(() => {
     if (chartData.length === 0) return ['auto', 'auto'];
     const values = chartData.map((d) => d.weight);
     const min = Math.min(...values);
-    const max = Math.max(...values);
+    // 最高体重の基準線も画面内に収まるよう、上限の計算に含める
+    const max = Math.max(...values, allTimeMaxWeight || 0);
     const padding = Math.max((max - min) * 0.15, 0.5);
     return [Math.floor((min - padding) * 10) / 10, Math.ceil((max + padding) * 10) / 10];
-  }, [chartData]);
+  }, [chartData, allTimeMaxWeight]);
 
   const fatDomain = useMemo(() => {
     const values = chartData.map((d) => d.fat).filter((v) => v != null);
@@ -98,6 +111,11 @@ export default function WeightDashboard() {
           )}
         </div>
         {latest && <p style={{ color: '#8492AD', fontSize: 11, margin: '6px 0 0' }}>{latest.logged_date} 測定</p>}
+        {latest && allTimeMaxWeight != null && (
+          <p style={{ color: '#7FE3D6', fontSize: 12, margin: '4px 0 0', fontWeight: 600 }}>
+            最高体重({allTimeMaxWeight.toFixed(1)}kg)から −{(allTimeMaxWeight - Number(latest.weight_kg)).toFixed(1)}kg
+          </p>
+        )}
       </div>
 
       {/* 期間切り替え */}
@@ -107,6 +125,7 @@ export default function WeightDashboard() {
           [30, '30日'],
           [90, '90日'],
           [365, '1年'],
+          [730, '2年'],
         ].map(([r, label]) => (
           <button
             key={r}
@@ -166,6 +185,20 @@ export default function WeightDashboard() {
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
+                {allTimeMaxWeight != null && (
+                  <ReferenceLine
+                    yAxisId="weight"
+                    y={allTimeMaxWeight}
+                    stroke="#E07856"
+                    strokeDasharray="5 5"
+                    label={{
+                      value: `最高 ${allTimeMaxWeight.toFixed(1)}kg (${maxWeightDate ? maxWeightDate.slice(2) : ''})`,
+                      fontSize: 10,
+                      fill: '#E07856',
+                      position: 'insideTopLeft',
+                    }}
+                  />
+                )}
                 <Line yAxisId="weight" type="monotone" dataKey="weight" name="体重" stroke={TEAL} strokeWidth={2.5} dot={false} />
                 {showFat && hasFatData && (
                   <Line yAxisId="fat" type="monotone" dataKey="fat" name="体脂肪率" stroke={AMBER} strokeWidth={2} dot={false} />

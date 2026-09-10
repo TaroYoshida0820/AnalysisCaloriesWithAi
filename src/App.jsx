@@ -144,6 +144,7 @@ export default function App() {
         fat: String(result.fat),
         carbs: String(result.carbs),
         provider: result.provider,
+        loggedDate: todayStr(),
       });
       setStage('confirm');
     } catch (err) {
@@ -154,7 +155,7 @@ export default function App() {
   }, [pendingFile, comment]);
 
   const startManualEntry = () => {
-    setAnalysis({ ...emptyManualEntry, provider: 'manual' });
+    setAnalysis({ ...emptyManualEntry, provider: 'manual', loggedDate: todayStr() });
     setImagePreview(null);
     setStage('confirm');
   };
@@ -169,6 +170,7 @@ export default function App() {
       fat: item.fat_g != null ? String(item.fat_g) : '',
       carbs: item.carbs_g != null ? String(item.carbs_g) : '',
       provider: 'repeat',
+      loggedDate: todayStr(),
     });
     setImagePreview(null);
     setStage('confirm');
@@ -184,8 +186,13 @@ export default function App() {
       setErrorMsg('料理名とカロリーは必須です。');
       return;
     }
+    if (!analysis.loggedDate) {
+      setErrorMsg('日付を入力してください。');
+      return;
+    }
 
     const entryFields = {
+      logged_date: analysis.loggedDate,
       food_name: analysis.foodName.trim(),
       kcal: kcalNum,
       protein_g: analysis.protein ? parseInt(analysis.protein, 10) : null,
@@ -195,7 +202,7 @@ export default function App() {
     };
 
     if (analysis.id) {
-      // 編集モード: 既存レコードを更新(日付・登録日時は変更しない)
+      // 編集モード: 既存レコードを更新(日付も変更可能にしてある)
       const { data, error } = await supabase
         .from('food_logs')
         .update(entryFields)
@@ -211,9 +218,8 @@ export default function App() {
 
       setEntries((prev) => prev.map((e) => (e.id === analysis.id ? data[0] : e)));
     } else {
-      // 新規登録モード
-      const newEntry = { logged_date: todayStr(), ...entryFields };
-      const { data, error } = await supabase.from('food_logs').insert(newEntry).select();
+      // 新規登録モード(日付は今日以外も指定可能。記録し忘れた過去の食事を後から追加する用途)
+      const { data, error } = await supabase.from('food_logs').insert(entryFields).select();
 
       if (error) {
         console.error(error);
@@ -254,6 +260,7 @@ export default function App() {
       fat: entry.fat_g != null ? String(entry.fat_g) : '',
       carbs: entry.carbs_g != null ? String(entry.carbs_g) : '',
       provider: entry.provider,
+      loggedDate: entry.logged_date,
     });
     setImagePreview(null);
     setStage('confirm');
@@ -446,6 +453,15 @@ export default function App() {
             {imagePreview && <img src={imagePreview} alt="撮影した食事" style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 10, marginBottom: 16 }} />}
             {analysis.provider === 'manual' && <p style={{ color: TEAL, fontSize: 12, fontWeight: 700, margin: '0 0 12px' }}>手入力モード(AI解析なし)</p>}
             {analysis.provider === 'repeat' && <p style={{ color: TEAL, fontSize: 12, fontWeight: 700, margin: '0 0 12px' }}>よく食べるものから選択(過去の記録を再利用・必要に応じて数値を調整してください)</p>}
+
+            <p style={{ color: MUTED, fontSize: 13, margin: '0 0 4px' }}>日付{analysis.id ? '(編集中)' : ''}</p>
+            <input
+              type="date"
+              value={analysis.loggedDate || ''}
+              onChange={(e) => updateAnalysisField('loggedDate', e.target.value)}
+              max={todayStr()}
+              style={{ ...inputStyle, marginBottom: 16 }}
+            />
 
             <p style={{ color: MUTED, fontSize: 13, margin: '0 0 4px' }}>料理名</p>
             <input type="text" value={analysis.foodName} onChange={(e) => updateAnalysisField('foodName', e.target.value)}
