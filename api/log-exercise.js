@@ -49,6 +49,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'POSTメソッドのみ対応しています' });
   }
 
+  // デバッグ用: リクエストボディに debug:true を含めると、
+  // 実際に受信した生データをそのまま返して、DBには保存しない。
+  if (req.body && req.body.debug === true) {
+    return res.status(200).json({
+      debug: true,
+      received_body: req.body,
+      burned_kcal_type: typeof req.body.burned_kcal,
+      burned_kcal_is_array: Array.isArray(req.body.burned_kcal),
+      burned_kcal_raw: req.body.burned_kcal,
+    });
+  }
+
   try {
     const { logged_date, exercise_type, duration_min } = req.body;
     let { burned_kcal } = req.body;
