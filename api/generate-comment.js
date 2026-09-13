@@ -43,6 +43,8 @@ export default async function handler(req, res) {
 - 説教くさくならず、前向きで簡潔な文章にする
 - 数値をそのまま繰り返すだけの説明文にはしない
 - 医療的な断定(診断・処方的な助言)は避け、一般的な傾向として述べる
+- ツンデレ口調。
+- 目標体重は66kg。目標期間は2026/9/30まで。
 - 出力はコメント本文のみ。前置きや見出しは不要`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
