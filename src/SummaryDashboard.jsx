@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
 } from 'recharts';
-import { TrendingDown } from 'lucide-react';
+import { TrendingDown, Sparkles, Loader2 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
 const NAVY = '#1B2A4A';
@@ -21,6 +21,9 @@ export default function SummaryDashboard() {
   const [exerciseLogs, setExerciseLogs] = useState([]);
   const [bmrLogs, setBmrLogs] = useState([]);
   const [days, setDays] = useState(14);
+  const [aiComment, setAiComment] = useState('');
+  const [commentLoading, setCommentLoading] = useState(false);
+  const [commentError, setCommentError] = useState('');
 
   useEffect(() => {
     loadAll();
@@ -114,6 +117,56 @@ export default function SummaryDashboard() {
       });
   }, [foodLogs, exerciseLogs, bmrLogs, days]);
 
+  // AIコメント生成用に、期間全体を要約する
+  const summaryStats = useMemo(() => {
+    if (balanceChartData.length === 0) return null;
+    const avgIntake = Math.round(
+      balanceChartData.reduce((sum, d) => sum + d.摂取, 0) / balanceChartData.length
+    );
+    const avgBurn = Math.round(
+      balanceChartData.reduce((sum, d) => sum + d.基礎代謝 + d.アクティブ, 0) / balanceChartData.length
+    );
+    const daysOverIntake = balanceChartData.filter(
+      (d) => d.摂取 > d.基礎代謝 + d.アクティブ
+    ).length;
+
+    return {
+      periodDays: days,
+      latestWeight: latestWeight ? Number(latestWeight.weight_kg) : null,
+      weightChange: weightChangeInRange != null ? Number(weightChangeInRange.toFixed(1)) : null,
+      latestBodyFat: latestFat,
+      bodyFatChange: fatChange != null ? Number(fatChange.toFixed(1)) : null,
+      avgIntake,
+      avgBurn,
+      daysOverIntake,
+      totalDays: balanceChartData.length,
+    };
+  }, [balanceChartData, days, latestWeight, weightChangeInRange, latestFat, fatChange]);
+
+  async function handleGenerateComment() {
+    if (!summaryStats) return;
+    setCommentLoading(true);
+    setCommentError('');
+    try {
+      const response = await fetch('/api/generate-comment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(summaryStats),
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'コメントの生成に失敗しました');
+      }
+      const data = await response.json();
+      setAiComment(data.comment);
+    } catch (err) {
+      console.error(err);
+      setCommentError('コメントの生成に失敗しました。もう一度お試しください。');
+    } finally {
+      setCommentLoading(false);
+    }
+  }
+
   return (
     <div style={{ padding: '20px', maxWidth: 480, margin: '0 auto', fontFamily: 'Calibri, sans-serif' }}>
       {/* 期間切り替え(体重・カロリー収支どちらにも共通で適用) */}
@@ -198,10 +251,32 @@ export default function SummaryDashboard() {
 
       {/* AIコメント */}
       <div style={{ background: ICE, borderRadius: 14, padding: 16 }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: '0 0 6px' }}>AIコメント</p>
-        <p style={{ fontSize: 13, color: MUTED, margin: 0, lineHeight: 1.6 }}>
-          コメント欄(今後実装)
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiComment || commentError ? 10 : 0 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: 0 }}>AIコメント</p>
+          <button
+            onClick={handleGenerateComment}
+            disabled={commentLoading || !summaryStats}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, background: NAVY, color: '#fff',
+              border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+              cursor: commentLoading ? 'default' : 'pointer', opacity: commentLoading || !summaryStats ? 0.6 : 1,
+            }}
+          >
+            {commentLoading ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={13} />}
+            {commentLoading ? '生成中...' : 'コメントを生成する'}
+          </button>
+        </div>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
+        {commentError && <p style={{ fontSize: 12, color: '#B91C1C', margin: 0 }}>{commentError}</p>}
+
+        {aiComment && !commentError && (
+          <p style={{ fontSize: 13, color: NAVY, margin: 0, lineHeight: 1.7 }}>{aiComment}</p>
+        )}
+
+        {!aiComment && !commentError && !commentLoading && (
+          <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>ボタンを押すと、直近{days}日のデータを踏まえたコメントが表示されます。</p>
+        )}
       </div>
     </div>
   );
