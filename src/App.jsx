@@ -80,18 +80,20 @@ export default function App() {
     if (!error && data) setEntries(data);
   }
 
-  // 過去の記録から「よく食べるもの」を集計する
+  // 過去の記録から「よく食べるもの」を集計する(非表示にした料理名は除く)
   async function loadFrequentFoods() {
-    const { data, error } = await supabase
-      .from('food_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(200);
+    const [logsResult, hiddenResult] = await Promise.all([
+      supabase.from('food_logs').select('*').order('created_at', { ascending: false }).limit(200),
+      supabase.from('hidden_frequent_foods').select('food_name'),
+    ]);
 
-    if (error || !data) return;
+    if (logsResult.error || !logsResult.data) return;
+
+    const hiddenNames = new Set((hiddenResult.data || []).map((h) => h.food_name));
 
     const map = new Map();
-    for (const row of data) {
+    for (const row of logsResult.data) {
+      if (hiddenNames.has(row.food_name)) continue;
       if (!map.has(row.food_name)) {
         map.set(row.food_name, { ...row, count: 1 });
       } else {
@@ -172,6 +174,17 @@ export default function App() {
     });
     setImagePreview(null);
     setStage('confirm');
+  };
+
+  // 「よく食べるもの」から特定の料理を非表示にする(過去の記録自体は消さない)
+  const hideFrequentFood = async (foodName) => {
+    const { error } = await supabase.from('hidden_frequent_foods').upsert({ food_name: foodName });
+    if (error) {
+      console.error(error);
+      alert('非表示にできませんでした。');
+      return;
+    }
+    setFrequentFoods((prev) => prev.filter((f) => f.food_name !== foodName));
   };
 
   // 保存済みの記録を編集する
@@ -370,21 +383,32 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {frequentFoods.map((item) => (
-                        <button
+                        <div
                           key={item.food_name}
-                          onClick={() => selectFrequentFood(item)}
                           style={{
                             background: '#fff', border: `1px solid ${ICE}`, borderRadius: 20,
-                            padding: '8px 14px', fontSize: 13, color: NAVY, cursor: 'pointer',
+                            padding: '6px 6px 6px 14px', fontSize: 13, color: NAVY,
                             display: 'flex', alignItems: 'center', gap: 6,
                           }}
                         >
-                          <span style={{ fontWeight: 600 }}>{item.food_name}</span>
-                          <span style={{ color: MUTED, fontSize: 11 }}>{item.kcal}kcal</span>
-                          <span style={{ background: ICE, color: NAVY, borderRadius: 10, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
-                            ×{item.count}
-                          </span>
-                        </button>
+                          <button
+                            onClick={() => selectFrequentFood(item)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: NAVY, padding: 0 }}
+                          >
+                            <span style={{ fontWeight: 600 }}>{item.food_name}</span>
+                            <span style={{ color: MUTED, fontSize: 11 }}>{item.kcal}kcal</span>
+                            <span style={{ background: ICE, color: NAVY, borderRadius: 10, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
+                              ×{item.count}
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => hideFrequentFood(item.food_name)}
+                            aria-label="このリストから非表示にする"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUTED, padding: 2, display: 'flex', alignItems: 'center' }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>

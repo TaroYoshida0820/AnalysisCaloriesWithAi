@@ -21,13 +21,93 @@ export default function SummaryDashboard() {
   const [exerciseLogs, setExerciseLogs] = useState([]);
   const [bmrLogs, setBmrLogs] = useState([]);
   const [days, setDays] = useState(14);
+  const [goalValue, setGoalValue] = useState('');
+  const [goalMetric, setGoalMetric] = useState('weight_kg');
+  const [goalSaving, setGoalSaving] = useState(false);
+  const [toneInstruction, setToneInstruction] = useState('');
+  const [toneSaving, setToneSaving] = useState(false);
+  const [iconUrl, setIconUrl] = useState('');
+  const [iconUploading, setIconUploading] = useState(false);
   const [aiComment, setAiComment] = useState('');
   const [commentLoading, setCommentLoading] = useState(false);
   const [commentError, setCommentError] = useState('');
 
   useEffect(() => {
     loadAll();
+    loadGoal();
+    loadToneInstruction();
   }, []);
+
+  async function loadToneInstruction() {
+    const { data } = await supabase.from('ai_comment_settings').select('*').eq('id', 1).single();
+    if (data?.tone_instruction) setToneInstruction(data.tone_instruction);
+    if (data?.icon_url) setIconUrl(data.icon_url);
+  }
+
+  async function handleIconUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIconUploading(true);
+    try {
+      // ファイル名は固定にして、毎回同じ場所を上書きする(古い画像がストレージに溜まらないようにするため)
+      const ext = file.name.split('.').pop();
+      const filePath = `icon.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('ai-comment-icons')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('ai-comment-icons').getPublicUrl(filePath);
+      // キャッシュ対策のため、末尾にタイムスタンプを付けて毎回新しいURLとして扱う
+      const publicUrlWithCacheBust = `${urlData.publicUrl}?t=${Date.now()}`;
+
+      await supabase.from('ai_comment_settings').upsert({
+        id: 1,
+        icon_url: publicUrlWithCacheBust,
+        updated_at: new Date().toISOString(),
+      });
+
+      setIconUrl(publicUrlWithCacheBust);
+    } catch (err) {
+      console.error(err);
+      alert('アイコンのアップロードに失敗しました。');
+    } finally {
+      setIconUploading(false);
+    }
+  }
+
+  async function saveToneInstruction() {
+    setToneSaving(true);
+    await supabase.from('ai_comment_settings').upsert({
+      id: 1,
+      tone_instruction: toneInstruction,
+      updated_at: new Date().toISOString(),
+    });
+    setToneSaving(false);
+  }
+
+  async function loadGoal() {
+    const { data } = await supabase.from('user_goals').select('*').eq('id', 1).single();
+    if (data) {
+      setGoalMetric(data.metric);
+      setGoalValue(String(data.target_value));
+    }
+  }
+
+  async function saveGoal() {
+    if (!goalValue) return;
+    setGoalSaving(true);
+    await supabase.from('user_goals').upsert({
+      id: 1,
+      metric: goalMetric,
+      target_value: Number(goalValue),
+      updated_at: new Date().toISOString(),
+    });
+    setGoalSaving(false);
+  }
 
   async function loadAll() {
     const [w, f, e, b] = await Promise.all([
@@ -86,12 +166,17 @@ export default function SummaryDashboard() {
     cutoff.setDate(cutoff.getDate() - days);
     const cutoffStr = cutoff.toISOString().split('T')[0];
 
+    // 当日はまだ食事・運動データが出揃っていないことが多く、
+    // 中途半端な数字がグラフに出てしまうため、集計対象からは除外する(前日までを表示)
+    const todayDate = new Date();
+    const todayDateStr = todayDate.toISOString().split('T')[0];
+
     const dateSet = new Set();
     [...foodLogs, ...exerciseLogs].forEach((l) => {
-      if (l.logged_date >= cutoffStr) dateSet.add(l.logged_date);
+      if (l.logged_date >= cutoffStr && l.logged_date < todayDateStr) dateSet.add(l.logged_date);
     });
-    // 期間内の日付は、食事/運動の記録が無い日も含めて連続で表示する
-    for (let i = 0; i < days; i++) {
+    // 期間内の日付は、食事/運動の記録が無い日も含めて連続で表示する(当日は除く)
+    for (let i = 1; i <= days; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dStr = d.toISOString().split('T')[0];
@@ -140,8 +225,11 @@ export default function SummaryDashboard() {
       avgBurn,
       daysOverIntake,
       totalDays: balanceChartData.length,
+      goalMetric,
+      goalValue: goalValue ? Number(goalValue) : null,
+      toneInstruction: toneInstruction || null,
     };
-  }, [balanceChartData, days, latestWeight, weightChangeInRange, latestFat, fatChange]);
+  }, [balanceChartData, days, latestWeight, weightChangeInRange, latestFat, fatChange, goalMetric, goalValue, toneInstruction]);
 
   async function handleGenerateComment() {
     if (!summaryStats) return;
@@ -189,6 +277,37 @@ export default function SummaryDashboard() {
             {label}
           </button>
         ))}
+      </div>
+
+      {/* 目標値の設定(現時点では体重のみ。将来的に体脂肪率・除脂肪体重にも切り替えられるようmetricを持たせてある) */}
+      <div style={{ background: '#fff', borderRadius: 14, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <p style={{ fontSize: 12, color: MUTED, margin: 0, whiteSpace: 'nowrap' }}>目標体重</p>
+        <input
+          type="number"
+          value={goalValue}
+          onChange={(e) => setGoalValue(e.target.value)}
+          onBlur={saveGoal}
+          placeholder="例: 65"
+          style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14 }}
+        />
+        <span style={{ fontSize: 12, color: MUTED }}>kg</span>
+        {goalSaving && <span style={{ fontSize: 11, color: TEAL }}>保存中...</span>}
+      </div>
+
+      {/* AIコメントの口調・トーン(自由記述、そのままプロンプトに追加指示として渡す) */}
+      <div style={{ background: '#fff', borderRadius: 14, padding: 14, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>AIコメントの口調(任意)</p>
+          {toneSaving && <span style={{ fontSize: 11, color: TEAL }}>保存中...</span>}
+        </div>
+        <textarea
+          value={toneInstruction}
+          onChange={(e) => setToneInstruction(e.target.value)}
+          onBlur={saveToneInstruction}
+          placeholder="例: 熱血コーチっぽく応援する口調で。絵文字も少し使って。"
+          rows={2}
+          style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
+        />
       </div>
 
       {/* 体重推移 */}
@@ -252,7 +371,29 @@ export default function SummaryDashboard() {
       {/* AIコメント */}
       <div style={{ background: ICE, borderRadius: 14, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiComment || commentError ? 10 : 0 }}>
-          <p style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: 0 }}>AIコメント</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* アイコン(未設定なら丸い枠だけ表示。タップ/クリックでアップロード) */}
+            <label style={{ cursor: 'pointer', position: 'relative' }}>
+              <input type="file" accept="image/*" onChange={handleIconUpload} style={{ display: 'none' }} />
+              {iconUrl ? (
+                <img
+                  src={iconUrl}
+                  alt="AIアイコン"
+                  style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: `1px solid ${ICE}` }}
+                />
+              ) : (
+                <div style={{
+                  width: 28, height: 28, borderRadius: '50%', background: '#fff', border: `1px dashed ${MUTED}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {iconUploading
+                    ? <Loader2 size={12} color={MUTED} style={{ animation: 'spin 1s linear infinite' }} />
+                    : <span style={{ fontSize: 9, color: MUTED }}>設定</span>}
+                </div>
+              )}
+            </label>
+            <p style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: 0 }}>AIコメント</p>
+          </div>
           <button
             onClick={handleGenerateComment}
             disabled={commentLoading || !summaryStats}
@@ -271,7 +412,12 @@ export default function SummaryDashboard() {
         {commentError && <p style={{ fontSize: 12, color: '#B91C1C', margin: 0 }}>{commentError}</p>}
 
         {aiComment && !commentError && (
-          <p style={{ fontSize: 13, color: NAVY, margin: 0, lineHeight: 1.7 }}>{aiComment}</p>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            {iconUrl && (
+              <img src={iconUrl} alt="AIアイコン" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+            )}
+            <p style={{ fontSize: 13, color: NAVY, margin: 0, lineHeight: 1.7 }}>{aiComment}</p>
+          </div>
         )}
 
         {!aiComment && !commentError && !commentLoading && (
