@@ -370,30 +370,8 @@ export default function SummaryDashboard() {
 
       {/* AIコメント */}
       <div style={{ background: ICE, borderRadius: 14, padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiComment || commentError ? 10 : 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* アイコン(未設定なら丸い枠だけ表示。タップ/クリックでアップロード) */}
-            <label style={{ cursor: 'pointer', position: 'relative' }}>
-              <input type="file" accept="image/*" onChange={handleIconUpload} style={{ display: 'none' }} />
-              {iconUrl ? (
-                <img
-                  src={iconUrl}
-                  alt="AIアイコン"
-                  style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: `1px solid ${ICE}` }}
-                />
-              ) : (
-                <div style={{
-                  width: 28, height: 28, borderRadius: '50%', background: '#fff', border: `1px dashed ${MUTED}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {iconUploading
-                    ? <Loader2 size={12} color={MUTED} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <span style={{ fontSize: 9, color: MUTED }}>設定</span>}
-                </div>
-              )}
-            </label>
-            <p style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: 0 }}>AIコメント</p>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: 0 }}>AIコメント</p>
           <button
             onClick={handleGenerateComment}
             disabled={commentLoading || !summaryStats}
@@ -409,20 +387,49 @@ export default function SummaryDashboard() {
         </div>
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-        {commentError && <p style={{ fontSize: 12, color: '#B91C1C', margin: 0 }}>{commentError}</p>}
-
-        {aiComment && !commentError && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            {iconUrl && (
-              <img src={iconUrl} alt="AIアイコン" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+        {/* アイコンは本文の左に1つだけ表示(チャット吹き出し風)。タップ/クリックでアップロード */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <label title="アイコンを変更" style={{ cursor: 'pointer', position: 'relative', flexShrink: 0, width: 32, height: 32 }}>
+            <input type="file" accept="image/*" onChange={handleIconUpload} style={{ display: 'none' }} />
+            {iconUrl ? (
+              <img
+                src={iconUrl}
+                alt="AIアイコン"
+                style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+              />
+            ) : (
+              <div style={{
+                width: 32, height: 32, borderRadius: '50%', background: '#fff', border: `1px dashed ${MUTED}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+              }}>
+                {!iconUploading && <span style={{ fontSize: 9, color: MUTED }}>設定</span>}
+              </div>
             )}
-            <p style={{ fontSize: 13, color: NAVY, margin: 0, lineHeight: 1.7 }}>{aiComment}</p>
-          </div>
-        )}
+            {/* アップロード中はアイコンの上にスピナーを重ねる(設定済みでも進捗が分かるように) */}
+            {iconUploading && (
+              <div style={{
+                position: 'absolute', inset: 0, borderRadius: '50%', background: 'rgba(255,255,255,0.7)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Loader2 size={14} color={MUTED} style={{ animation: 'spin 1s linear infinite' }} />
+              </div>
+            )}
+          </label>
 
-        {!aiComment && !commentError && !commentLoading && (
-          <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>ボタンを押すと、直近{days}日のデータを踏まえたコメントが表示されます。</p>
-        )}
+          <div style={{ flex: 1, minWidth: 0, paddingTop: 6 }}>
+            {commentError && <p style={{ fontSize: 12, color: '#B91C1C', margin: 0 }}>{commentError}</p>}
+
+            {aiComment && !commentError && (
+              <p style={{ fontSize: 13, color: NAVY, margin: 0, lineHeight: 1.7 }}>{aiComment}</p>
+            )}
+
+            {!aiComment && !commentError && (
+              <p style={{ fontSize: 12, color: MUTED, margin: 0 }}>
+                {commentLoading ? 'コメントを生成しています...' : `ボタンを押すと、直近${days}日のデータを踏まえたコメントが表示されます。`}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
